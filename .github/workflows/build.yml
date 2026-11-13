@@ -12,46 +12,80 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Check HTML files
+        run: |
+          test -f index.html
+          test -f style.css
+          test -f script.js
+          echo "All 3 files found"
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Cordova
-        run: npm install -g cordova
+      - name: Setup Cordova
+        run: npm install -g cordova@12.0.0
 
-      - name: Create iOS project
+      - name: Create iOS application
         run: |
-          mkdir ios-project
+          cordova create ios-project com.example.myapp MyApp
           cd ios-project
-          cordova create app com.example.myapp MyApp
-          cd app
-          cordova platform add ios
+          cordova platform add ios@7.1.1
 
-      - name: Copy HTML files
+      - name: Copy application files
         run: |
-          cp index.html ios-project/app/www/index.html
-          cp style.css ios-project/app/www/style.css
-          cp script.js ios-project/app/www/script.js
+          cp index.html ios-project/www/index.html
+          cp style.css ios-project/www/style.css
+          cp script.js ios-project/www/script.js
 
-      - name: Build iOS
+      - name: Prepare iOS project
         run: |
-          cd ios-project/app
-          cordova build ios --device
+          cd ios-project
+          cordova prepare ios
 
-      - name: Create IPA
+      - name: Build unsigned iOS application
         run: |
-          cd ios-project/app
+          cd ios-project
+
+          xcodebuild \
+            -project platforms/ios/MyApp.xcodeproj \
+            -scheme MyApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: |
           mkdir -p Payload
-          cp -R platforms/ios/build/device/*.app Payload/
-          zip -r MyApp.ipa Payload
+
+          APP_PATH=$(find ios-project/build/Build/Products \
+            -maxdepth 2 -type d \
+            -name "*.app" \
+            -path "*/Release-iphoneos/*" \
+            -print -quit)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: iOS application not found"
+            exit 1
+          fi
+
+          cp -R "$APP_PATH" Payload/
+          zip -qr MyApp.ipa Payload
+
+          test -f MyApp.ipa
+          ls -lh MyApp.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: MyApp-IPA
-          path: ios-project/app/MyApp.ipa
-
+          path: MyApp.ipa
+          if-no-files-found: error
+          retention-days: 7
